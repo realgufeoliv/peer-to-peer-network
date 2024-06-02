@@ -1,33 +1,27 @@
-const { Console } = require('console');
 const net = require('net');
+const helpers = require('./helpers');
+const actions = require('./actions');
+const strings = require('./strings')
+const messageReceiveMenager = require('./messageReceiveMenager')
 
 module.exports = class Peer {
   constructor(host, port) {
+    this.hop_count = 1;
     this.host = host;
     this.port = port;
     this.neighbors = [];
     this.msg_count = 0;
+    this.waitingResponses = [];
+    this.sockets = {};
+    this.localTable = {};
+    this.ttl = 100;
+    this.openedMessagesSet = new Set();
     this.server = net.createServer((socket) => {
       socket.on('data', (data) => {
-        //data recebida
-        const formattedData = data.toString().split(' ');
-        console.log(formattedData)
-        if(formattedData[3] === 'HELLO_OK'){
-          console.log(`   Vizinho adicionado com sucesso!`);
-        }
+        helpers.sendConfirmationMessage(data, socket);
 
-
-
-       
-          console.log(`Mensagem recebida: ${data.toString()}`);
-        switch(formattedData[3]){
-          case 'HELLO':
-            console.log(`   Adicionando vizinho ${formattedData[0]}`);
-            this.neighbors.push({host: formattedData[0], port: formattedData[1]});
-            socket.write(`${this.host}:${this.port} ${formattedData[2]} 1 HELLO_OK`)
-            break;            
-        
-      }
+        console.log(`Mensagem recebida "${data.toString()}"`)
+        messageReceiveMenager(data, this, socket);
       });
     });
     this.server.listen(port, host, () => {
@@ -35,25 +29,41 @@ module.exports = class Peer {
     });
   }
 
+  socketHeader = () => {
+    return `${this.host}:${this.port} ${this.msg_count}`;
+  }
+
   connectTo(host, port) {
     this.msg_count += 1;
     return new Promise((resolve, reject) => {
       console.log(`Tentando adicionar vizinho ${host}:${port}`);
-      console.log(`Encaminhando mensagem "${this.host}:${this.port} ${this.msg_count} 1 HELLO" para ${host}:${port}`);
-
+      console.log(`Encaminhando mensagem "${this.socketHeader()} 1 HELLO" para ${host}:${port}`);
       const client = net.createConnection({ host, port }, () => {
-        client.write(`${this.host}:${this.port} ${this.msg_count} 1 HELLO`);        
-        
+        client.write(`${this.socketHeader()} 1 HELLO`);
+        client.on('data', data => {
+          const formattedData = data.toString().split(' ');
+  
+          if(formattedData[3] == 'HELLO'){
+            helpers.sendConfirmationMessage(data, client);
+          }
+          if(formattedData[3] === 'HELLO_OK'){
+            if(!this.checkIfIncludesNeighbor(`${host}:${port}`)){
+              this.addNeighbor(`${host}:${port}`);
+              this.sockets[`${host}:${port}`] = client;
+              
+  
+            }
+            console.log(`   Envio feito com sucesso:"${this.host}:${this.port} ${this.msg_count} 1 HELLO"`);
+  
+          }
+          resolve();
+        });
       });
-      client.on('data', data => {
-        const formattedData = data.toString().split(' ');
-        if(formattedData[3] === 'HELLO_OK'){
-          console.log(`   Envio feito com sucesso:"${this.host}:${this.port} ${this.msg_count} 1 HELLO"`);
-        }
-        resolve();
-      });
+
       client.on('end', () => {
         console.log(`Desconectado do servidor ${host}:${port}`);
+        this.neighbors = this.neighbors.filter(neighbor => neighbor !== `${host}:${port}`);
+        delete this.sockets[`${host}:${port}`];
       });
       client.on('error', err => {
         reject(err);
@@ -61,4 +71,56 @@ module.exports = class Peer {
     });
   }
 
+  addNeighbor = (neighbor) => {
+    this.neighbors.push(neighbor);
+  }
+
+  addSocket = (socket,address) => {
+    this.sockets[address] = socket;
+  }
+
+  getNeighbors = () => {
+      return this.neighbors;
+   }
+
+   getSockets = () => {
+      return this.sockets;
+   }
+
+   incrementMsgCount = () => {
+      this.msg_count += 1;
+   }
+
+  checkIfIncludesNeighbor = (neighbor) => {
+    return this.neighbors.includes(neighbor);
+  }
+
+  setLocalTableKeys = (key, value) => {
+    this.localTable[key] = value;
+  }
+
+  getLocalTable = () => {
+    return this.localTable;
+  }
+
+  getTtl = () => {
+    return this.ttl;
+  }
+
+
+  getOpenendMessagesSet = () => {
+    return this.openedMessagesSet;
+  }
+
+  addOpenedMessage = (message) => {
+    this.openedMessagesSet.add(message);
+  }
+
+  getHopCount = () => {
+    return this.hop_count;
+  }
+
+  getPort = () => {
+    return this.port;
+  }
 };
