@@ -6,15 +6,35 @@ const messageReceiveMenager = require("./messageReceiveMenager");
 
 module.exports = class Peer {
   constructor(host, port) {
-    this.hop_count = 1;
+    this.dfsNeighbors = {
+      initial: "",
+      validNeighbors: [],
+      activeNeighbor: "",
+      started : false
+    };
     this.host = host;
     this.port = port;
     this.neighbors = [];
-    this.msg_count = 0;
     this.waitingResponses = [];
     this.sockets = {};
     this.localTable = {};
     this.ttl = 100;
+    this.sqn = {
+      HELLO: 0,
+      SEARCH: 0,
+      VAL: 0,
+      BYE: 0,
+    };
+    this.searchesReceived = {
+      RW: 0,
+      FL: 0,
+      BP: 0,
+    };
+    this.hopCount = {
+      RW: [],
+      FL: [],
+      BP: [],
+    };
     this.openedMessagesSet = new Set();
     this.server = net.createServer((socket) => {
       socket.on("data", (data) => {
@@ -28,19 +48,20 @@ module.exports = class Peer {
     });
   }
 
-  socketHeader = () => {
-    return `${this.host}:${this.port} ${this.msg_count}`;
+  socketHeader = (operation) => {
+    return `${this.host}:${this.port} ${this.sqn[operation]}`;
   };
 
   connectTo(host, port) {
-    this.msg_count += 1;
+    this.incrementMsgSqn("HELLO");
     return new Promise((resolve, reject) => {
       console.log(`Tentando adicionar vizinho ${host}:${port}`);
+      let header = this.socketHeader("HELLO");
       console.log(
-        `Encaminhando mensagem "${this.socketHeader()} 1 HELLO" para ${host}:${port}`
+        `Encaminhando mensagem "${header} 1 HELLO" para ${host}:${port}`
       );
       const client = net.createConnection({ host, port }, () => {
-        client.write(`${this.socketHeader()} 1 HELLO`);
+        client.write(`${header} 1 HELLO`);
         client.once("data", (data) => {
           const formattedData = data.toString().split(" ");
 
@@ -53,7 +74,7 @@ module.exports = class Peer {
               this.sockets[`${host}:${port}`] = client;
             }
             console.log(
-              `   Envio feito com sucesso:"${this.host}:${this.port} ${this.msg_count} 1 HELLO "`
+              `   Envio feito com sucesso:"${this.host}:${this.port} ${this.sqn["HELLO"]} 1 HELLO"`
             );
           }
           resolve();
@@ -75,9 +96,35 @@ module.exports = class Peer {
 
   updateTtl = (newValue) => {
     this.ttl = newValue;
-  }
+  };
 
-  msgCounter = () => {}
+  incrementMessageQuantity = (operation) => {
+    this.searchesReceived[operation] += 1;
+  };
+
+  getMessagesReceived = (operation) => {
+    return this.searchesReceived[operation];
+  };
+
+  getAvgHops = (operation) => {
+    const hops = this.hopCount[operation];
+    if (hops.length === 0) {
+      return 0;
+    }
+    return hops.reduce((a, b) => a + b, 0) / hops.length;
+  };
+
+  getDeviation(operation) {
+    const arr = this.hopCount[operation];
+    if (arr.length === 0) {
+      return 0;
+    }
+    const media = this.getAvgHops(operation);
+    const variancia =
+      arr.reduce((soma, valor) => soma + Math.pow(valor - media, 2), 0) /
+      (arr.length - 1);
+    return Math.sqrt(variancia);
+  }
 
   getServer = () => {
     return this.server;
@@ -107,8 +154,8 @@ module.exports = class Peer {
     return this.sockets;
   };
 
-  incrementMsgCount = () => {
-    this.msg_count += 1;
+  incrementMsgSqn = (operation) => {
+    this.sqn[operation] += 1;
   };
 
   checkIfIncludesNeighbor = (neighbor) => {
@@ -135,19 +182,46 @@ module.exports = class Peer {
     this.openedMessagesSet.add(message);
   };
 
-  getHopCount = () => {
-    return this.hop_count;
-  };
-
   getPort = () => {
     return this.port;
   };
 
   getHost = () => {
     return this.host;
+  };
+
+  addHopCount = (operation, hopCount) => {
+    this.hopCount[operation].push(hopCount);
+  };
+
+  getMsgSqn = (operation) => {
+    return this.sqn[operation];
+  };
+
+  getRandomWalkNeighbors = () => {
+    return this.randomWalkNeighbors;
   }
 
-  getMsgCount = () => {
-    return this.msg_count;
+  addRandomWalkNeighbor = (neighbor) => {
+    this.randomWalkNeighbors.push(neighbor);
+  }
+
+ cleanRandomWalkNeighbors = () => {
+    this.dfsNeighbors.initial = "";
+    this.dfsNeighbors.validNeighbors = [];
+    this.dfsNeighbors.activeNeighbor = "";
+ }
+
+ updateDfsNeighborsByType = (type, neighbor) => {
+    this.dfsNeighbors[type] = neighbor;
+  }
+ 
+
+  updateDfsNeighbors = (initial, validNeighbors , activeNeighbor) => {
+    this.dfsNeighbors.initial = initial;
+    this.dfsNeighbors.validNeighbors = validNeighbors;
+    this.dfsNeighbors.activeNeighbor = activeNeighbor;
+    this.dfsNeighbors.started = true;
+
   }
 };

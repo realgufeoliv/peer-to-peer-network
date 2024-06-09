@@ -9,7 +9,7 @@ sendConfirmationMessage = (message, socket) => {
 };
 
 const createMessage = (peer, ttl, operation, parameters) => {
-  let message = `${peer.socketHeader()} ${ttl} ${operation}`;
+  let message = `${peer.socketHeader(operation)} ${ttl} ${operation}`;
   if (parameters) {
     parameters.forEach((parameter) => {
       message += ` ${parameter}`;
@@ -30,6 +30,8 @@ const formatToResend = (message, port) => {
   message = message.join(" ");
   return message;
 };
+
+
 
 module.exports = {
   sendConfirmationMessage,

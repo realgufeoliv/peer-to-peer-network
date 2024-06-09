@@ -24,12 +24,12 @@ messageSender = (socket, message, operation, address) => {
 
     await socket.once("data", (data) => {
       const formattedData = data.toString().split(" ");
+
       if (formattedData[3] === operation + "_OK") {
         console.log(`   Envio feito com sucesso:"${message}"`);
         resolve();
       } else {
         console.log("erro");
-
       }
     });
   });
@@ -46,15 +46,15 @@ tryToSendMessage = async (socket, mensage, operation, address) => {
 chooseNeighbor = async (peer) => {
   let answer = await genericPrompt("");
   if (checkIfIsInRange(0, peer.getNeighbors().length, answer)) {
-    peer.incrementMsgCount();
+    peer.incrementMsgSqn("HELLO");
     console.log(
-      `Encaminhando mensagem "${peer.socketHeader()} 1 HELLO" para ${
+      `Encaminhando mensagem "${peer.socketHeader("HELLO")} 1 HELLO" para ${
         peer.getNeighbors()[answer]
       }`
     );
     await tryToSendMessage(
       peer.getSockets()[peer.getNeighbors()[answer]],
-      `${peer.socketHeader()} 1 HELLO`,
+      `${peer.socketHeader("HELLO")} 1 HELLO`,
       "HELLO",
       peer.getNeighbors()[answer]
     );
@@ -84,16 +84,18 @@ floodingSearch = async (peer) => {
     console.log(`   chave:${answer}  valor: ${peer.getLocalTable()[answer]}`);
     return;
   } else {
-    peer.incrementMsgCount();
+    peer.incrementMsgSqn("SEARCH");
 
-    let messageIdentifier = `${peer.getHost()}:${peer.getPort()}${peer.getMsgCount()}`
+    let messageIdentifier = `${peer.getHost()}:${peer.getPort()}${peer.getMsgSqn(
+      "SEARCH"
+    )}`;
     peer.addOpenedMessage(messageIdentifier);
 
     let floodMessage = helpers.createMessage(peer, peer.getTtl(), "SEARCH", [
       "FL",
       peer.getPort(),
       answer,
-      peer.getHopCount(),
+      "1",
     ]);
 
     for (let neighbor of peer.getNeighbors()) {
@@ -114,22 +116,24 @@ randomWalkSearch = async (peer) => {
     console.log(`Valor na tabela local!`);
     console.log(`   chave:${answer}  valor: ${peer.getLocalTable()[answer]}`);
     return;
-  }else{
-    peer.incrementMsgCount();
+  } else {
+    peer.incrementMsgSqn("SEARCH");
 
-    //let messageIdentifier = `${peer.getHost()}:${peer.getPort()}${peer.getMsgCount()}`
-    //peer.addOpenedMessage(messageIdentifier);
+    let randomWalkMessage = helpers.createMessage(
+      peer,
+      peer.getTtl(),
+      "SEARCH",
+      ["RW", peer.getPort(), answer, "1"]
+    );
 
-    let randomWalkMessage = helpers.createMessage(peer, peer.getTtl(), "SEARCH", [
-      "RW",
-      peer.getPort(),
-      answer,
-      peer.getHopCount(),
-    ]);
+    let randomNeighbor =
+      peer.getNeighbors()[
+        Math.floor(Math.random() * peer.getNeighbors().length)
+      ];
 
-    let randomNeighbor = peer.getNeighbors()[Math.floor(Math.random() * peer.getNeighbors().length)];
-
-    console.log(`Encaminhando mensagem "${randomWalkMessage}" para ${randomNeighbor}`);
+    console.log(
+      `Encaminhando mensagem "${randomWalkMessage}" para ${randomNeighbor}`
+    );
     await tryToSendMessage(
       peer.getSockets()[randomNeighbor],
       randomWalkMessage,
@@ -137,7 +141,7 @@ randomWalkSearch = async (peer) => {
       randomNeighbor
     );
   }
-}
+};
 
 function isNumeric(value) {
   return !isNaN(value) && !isNaN(parseFloat(value));
@@ -147,15 +151,88 @@ changeTtl = async (peer) => {
   let answer = await genericPrompt("Digite o novo valor de TTL:\n");
   if (isNumeric(answer)) {
     peer.updateTtl(answer);
-  }else{
+  } else {
     console.log("Valor invalido");
     changeTtl(peer);
   }
-}
+};
+
+getStatistics = (peer) => {
+  console.log("\nEstatisticas:");
+  console.log(
+    `Total de mensagens de flooding vistas: ${peer.getMessagesReceived("FL")}`
+  );
+  console.log(
+    `Total de mensagens de random walk vistas: ${peer.getMessagesReceived(
+      "RW"
+    )}`
+  );
+  console.log(
+    `Total de mensagens de busca em profundidade vistas: ${peer.getMessagesReceived(
+      "BP"
+    )}`
+  );
+  console.log(
+    `Media de saltos ate encontrar destino por flooding: ${peer.getAvgHops(
+      "FL"
+    )} (dp ${peer.getDeviation("FL")})`
+  );
+  console.log(
+    `Media de saltos ate encontrar destino por random walk: ${peer.getAvgHops(
+      "RW"
+    )} (dp ${peer.getDeviation("RW")})`
+  );
+  console.log(
+    `Media de saltos ate encontrar destino por busca em profundidade: ${peer.getAvgHops(
+      "BP"
+    )} (dp ${peer.getDeviation("BP")})`
+  );
+};
+
+dfsSearch = async (peer) => {
+  let answer = await genericPrompt("Digite a chave a ser buscada:\n");
+  if (answer in peer.getLocalTable()) {
+    console.log(`Valor na tabela local!`);
+    console.log(`   chave:${answer}  valor: ${peer.getLocalTable()[answer]}`);
+    return;
+  } else {
+    peer.incrementMsgSqn("SEARCH");
+
+    let dfsMessage = helpers.createMessage(peer, peer.getTtl(), "SEARCH", [
+      "BP",
+      peer.getPort(),
+      answer,
+      "1",
+    ]);
+
+    let randomNeighbor =
+      peer.getNeighbors()[
+        Math.floor(Math.random() * peer.getNeighbors().length)
+      ];
+    let updatedNeighbors = peer
+      .getNeighbors()
+      .filter((neighbor) => neighbor !== randomNeighbor);
+    let activeNeighbor = randomNeighbor;
+
+    peer.updateDfsNeighbors(
+      `${peer.getPort()}`,
+      updatedNeighbors,
+      activeNeighbor
+    );
+
+    console.log(`Encaminhando mensagem "${dfsMessage}" para ${randomNeighbor}`);
+    await tryToSendMessage(
+      peer.getSockets()[randomNeighbor],
+      dfsMessage,
+      "SEARCH", 
+    );
+  }
+};
 
 byeMessage = async (peer) => {
   let byeMessage = helpers.createMessage(peer, 1, "BYE");
   for (let neighbor of peer.getNeighbors()) {
+    peer.incrementMsgSqn("BYE");
     console.log(`Encaminhando mensagem "${byeMessage}" para ${neighbor}`);
     await tryToSendMessage(
       peer.getSockets()[neighbor],
@@ -165,8 +242,7 @@ byeMessage = async (peer) => {
     );
     peer.getSockets()[neighbor].destroy();
   }
-
-}
+};
 
 const userOption = async (peer, answer) => {
   if (!["0", "1", "2", "3", "4", "5", "6", "9"].includes(answer)) {
@@ -188,7 +264,17 @@ const userOption = async (peer, answer) => {
         promptUser(peer, strings.menu);
         break;
       case "3":
+        await randomWalkSearch(peer).then(() => promptUser(peer, strings.menu));
 
+        break;
+      case "4":
+        await dfsSearch(peer);
+        promptUser(peer, strings.menu);
+        break;
+      case "5":
+        getStatistics(peer);
+
+        promptUser(peer, strings.menu);
         break;
       case "6":
         await changeTtl(peer);
@@ -198,9 +284,8 @@ const userOption = async (peer, answer) => {
         console.log("Saindo...");
         await byeMessage(peer);
         peer.getServer().close();
-        process.exit(0); 
+        process.exit(0);
         break;
-
     }
   }
 };
